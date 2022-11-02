@@ -1,13 +1,16 @@
+require("dotenv").config(); //.env configurtaion
 //essential variables for code
 const express = require('express');
 const hbs = require('hbs');
 const path = require('path');
 const bcrypt = require('bcryptjs')
-const jwt = require("jsonwebtoken")
+const cookieParser = require('cookie-parser');
+const User = require("./models/users")
+const auth = require("./middleware/auth")
+
 // const crud = require("./crud")
 const app = express();
 const port = process.env.PORT || 8000;
-const User = require("./models/users")
 
 //paths for serving files
 const staticPath = path.join(__dirname, '../public');
@@ -17,6 +20,7 @@ require("./db/conn");
 
 //serving files
 app.use(express.json())
+app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }))
 app.use(express.static(staticPath));
 app.set("view engine", "hbs");
@@ -32,6 +36,28 @@ app.get("/register", (req, res) => {
 })
 app.get("/login", (req, res) => {
     res.render("login")
+})
+app.get("/user", auth, (req, res) => {
+    res.render("user")
+})
+app.post("/user", auth, (req, res) => {
+    res.send(req.user);
+})
+
+//logout user
+app.get("/logout", auth, async(req, res) => {
+    try {
+        res.clearCookie("jwt")
+        req.user.tokens = req.user.tokens.filter((element) => {
+            return element.token !== req.token
+        })
+        console.log("logout successfully")
+        await req.user.save();
+        res.render("login")
+    } catch (error) {
+        res.status(500).send(error)
+
+    }
 })
 
 //register user
@@ -49,8 +75,15 @@ app.post("/register", async(req, res) => {
                 password: password,
             });
 
-            const token = await userdata.generateAuthToken()
-            console.log('the token is'+token)
+            const token = await userdata.generateAuthToken();
+            // console.log('the token is' + token)
+
+            res.cookie("jwt", token, {
+                expires: new Date(Date.now() + 2628002880),
+                // httpOnly:true
+            })
+
+
             const result = await userdata.save();
             console.log(result)
             res.send(result);
@@ -69,8 +102,18 @@ app.post("/login", async(req, res) => {
         const email = req.body.email;
         const password = req.body.password;
         const result = await User.findOne({ email: email });
-        const isMatch = await bcrypt.compare(password, result.password)
+        const isMatch = await bcrypt.compare(password, result.password);
+
+        // console.log(token)
+
+
         if (isMatch) {
+            const token = await result.generateAuthToken()
+            res.cookie("jwt", result.tokens[0].token, {
+                expires: new Date(Date.now() + 2628002880),
+            });
+
+            console.log("The cookie is " + req.cookies.jwt)
             res.status(200).send("valid yay")
         } else {
             res.status(400).send("invalid credentials");
@@ -79,6 +122,11 @@ app.post("/login", async(req, res) => {
     } catch (error) {
         res.status(400).send("invalid login credentials")
     }
+})
+
+//telling the server that cookie exists or not
+app.post("/isCookieThere", async(req, res) => {
+    res.send(req.cookies.jwt)
 })
 
 //listening to the server
